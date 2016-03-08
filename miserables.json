@@ -1,0 +1,11 @@
+{
+  "nodes":[
+    {"name":"Myriel","group":"asthma"},
+    {"name":"Napoleon","group":"hiv"}
+
+  ],
+
+  "links":[
+     {"source":"asthma","target":"hiv","value":1}
+  ]
+}
