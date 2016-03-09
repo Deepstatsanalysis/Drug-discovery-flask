@@ -1,4 +1,4 @@
-from flask import Flask,make_response,jsonify
+from flask import Flask,make_response,jsonify,request
 from flask.ext.elasticsearch import FlaskElasticsearch
 import requests
 import json
@@ -31,16 +31,75 @@ def set_default(obj):
 
 @app.route("/diseases/names")
 def get_diseases():
-    k = es.search(index="diseases", doc_type='names' ,body='{ "query": { "match_all": {} } }')['hits']
+    k = es.search(index="diseases", doc_type='ypq' ,body='{ "query": { "match_all": {} }, "fields" : ["name","code"] }')['hits']
     print json.dumps(k)
     return make_response(jsonify({'data': k }), 200)
 
 
 @app.route("/")
 def get_data():
-    k = es.search(index="diseases",body='{ "query": { "match_all": {} } }')['hits']['hits'][0]['_source']
+    k = es.search(index="diseases",body='{ "query": { "match_all": {} } }')
     print json.dumps(k)
     return make_response(jsonify({'data': k }), 200)
+
+@app.route("/crawl", methods=['POST'])
+def crawl():
+	code = request.json['code']
+
+	s = es.search(index="diseases",doc_type="ypq", body='{ "query": { "query_string": {"query":"'+code+'","fields":["code"]} } }')
+	if s['hits']['total']:
+		return "data alredy present"
+	else:
+		d = requests.get("https://www.targetvalidation.org/api/latest/association?disease="+code+"&datastructure=flat&stringency=1&filterbyscorevalue_min=0")
+
+		if d.json()['total'] == 0:
+			return "No records found"
+		else:
+			payload = {
+				"name":d.json()["data"][0]["disease"]["name"],
+				"code":code,
+				"data":d.json()["data"]
+			}
+			p = es.create(index="diseases",doc_type="ypq",body=json.dumps(payload))
+
+			return "Data successfully crawled"
+
+
+@app.route("/diseases/selected", methods=['POST'])
+def get_selected_data():
+
+	values = request.json["selected_values"]
+
+	diseasesNames = []
+
+	for i in values:
+		diseasesNames.append(i['fields']['name'][0])
+
+	print "###########################"
+	print diseasesNames
+	print "###########################"
+
+	query_builder = {
+				"query" : {
+			        "filtered" : {
+			            "filter" : {
+			                "terms" : {
+			                    "name" : diseasesNames
+			                }
+			            }
+			        }
+			    },
+				"_source" : ["name","data"]
+			}
+
+
+	s = es.search(index="diseases",doc_type="ypq", body=json.dumps(query_builder))
+
+	print json.dumps(s)
+
+	return json.dumps(s)
+
+
 
 
 
