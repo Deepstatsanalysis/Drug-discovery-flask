@@ -32,14 +32,12 @@ def set_default(obj):
 @app.route("/diseases/names")
 def get_diseases():
     k = es.search(index="diseases", doc_type='ypq' ,body='{ "query": { "match_all": {} }, "fields" : ["name","code"] }')['hits']
-    print json.dumps(k)
     return make_response(jsonify({'data': k }), 200)
 
 
 @app.route("/")
 def get_data():
     k = es.search(index="diseases",body='{ "query": { "match_all": {} } }')
-    print json.dumps(k)
     return make_response(jsonify({'data': k }), 200)
 
 @app.route("/crawl", methods=['POST'])
@@ -55,14 +53,30 @@ def crawl():
 		if d.json()['total'] == 0:
 			return "No records found"
 		else:
+			targetSymbols = []
+			for i in d.json()["data"]:
+				x = {}
+				x["symbol"] =i["target"]["symbol"]
+				x["id"] = i["target"]["id"]
+
+				k = requests.get("https://www.targetvalidation.org/api/latest/association?target="+x["id"]+"&datastructure=flat&facets=false&stringency=1&filterbyscorevalue_min=0")
+				diseases = []
+				for m in k.json()["data"]:
+					diseases.append(m["disease"]["name"])
+				x["disease"] = diseases
+				targetSymbols.append(x)
+
 			payload = {
 				"name":d.json()["data"][0]["disease"]["name"],
 				"code":code,
-				"data":d.json()["data"]
+				"data":d.json()["data"],
+				"datatypes":d.json()["available_datatypes"],
+				"facets":d.json()["facets"]["datatypes"],
+				"targetSymbols":targetSymbols
 			}
 			p = es.create(index="diseases",doc_type="ypq",body=json.dumps(payload))
 
-			return "Data successfully crawled"
+		return json.dumps(payload)
 
 
 @app.route("/diseases/selected", methods=['POST'])
@@ -74,11 +88,6 @@ def get_selected_data():
 
 	for i in values:
 		diseasesNames.append(i['fields']['name'][0])
-
-	print "###########################"
-	print diseasesNames
-	print "###########################"
-
 	query_builder = {
 				"query" : {
 			        "filtered" : {
@@ -89,58 +98,53 @@ def get_selected_data():
 			            }
 			        }
 			    },
-				"_source" : ["name","data"]
+				"_source" : ["name","data","datatypes","facets","targetSymbols"]
 			}
 
 
 	s = es.search(index="diseases",doc_type="ypq", body=json.dumps(query_builder))
 
-	print json.dumps(s)
-
 	return json.dumps(s)
 
 
+@app.route("/diseases/datatypes", methods=['POST'])
+def get_selected_datatypes():
+
+	selected_datatypes = request.json["selected_datatypes"]
+	selected_diseases = request.json["selected_diseases"]
+	diseasesNames = []
+	datatypes = []
+
+	for i in selected_diseases:
+		diseasesNames.append(i['fields']['name'][0])
+
+	for i in selected_datatypes:
+		datatypes.append(i)
+
+
+	query_builder = {
+				  "query": {
+				    "has_parent": {
+				      "data": "data",
+				      "query": {
+				        "match": {
+				          "association_score": 1
+				        }
+				      }
+				    }
+				  },
+		"_source" : ["name","data","datatypes"]
+	}
 
 
 
-# @app.route("/crawl")
-# def crawl():
-#
-#     return_data = {}
-#     nodes = list(set())
-#     links = []
-#
-#     diseaseList = [
-#         {'diseaseName':'asthma','code':'EFO_0000270'},
-#         # {'diseaseName':'hiv','code':'EFO_0000764'}
-#     ]
-#     def cttv(obj):
-#         do = {}
-#         do["Name"] = obj["diseaseName"]
-#         do["Id"] = obj["code"]
-#         nodes.append(do)
-#
-#         d = requests.get("https://www.targetvalidation.org/api/latest/association?disease="+obj['code']+"&datastructure=flat&stringency=1&filterbyscorevalue_min=0")
-#
-#         for i in d.json()['data']:
-#             node_obj = {}
-#             link_obj = {}
-#
-#             node_obj["Name"] = i["target"]["name"]
-#             node_obj["Id"] = i["target"]["symbol"]
-#             nodes.append(node_obj)
-#
-#             link_obj["Source"] = i["target"]["symbol"]
-#             link_obj["Target"] = obj["code"]
-#             link_obj["Value"] = 1
-#             links.append(link_obj)
-#
-#     map(cttv,diseaseList)
-#
-# 	return_data["Nodes"] = nodes
-#     return_data["Links"] = links
-#
-#     return json.dumps(p.content, default = set_default)
+	s = es.search(index="diseases",doc_type="ypq", body=json.dumps(query_builder))
+	print diseasesNames
+
+	print datatypes
+
+	return json.dumps(s)
+
 
 if __name__ == "__main__":
     app.run(debug=True)
