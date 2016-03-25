@@ -2,12 +2,14 @@ from flask import Flask,make_response,jsonify,request
 from flask.ext.elasticsearch import FlaskElasticsearch
 import requests
 import json
+import scrapy
+# from multiprocessing import Pool
+from processing import Pool
 app = Flask(__name__)
 
 #we are using default elasticsearch address
 #i.e. http://localhost:9200/
 es = FlaskElasticsearch(app)
-
 
 
 @app.after_request
@@ -29,10 +31,10 @@ def set_default(obj):
     raise TypeError
 
 
-@app.route("/diseases/names")
+@app.route("/diseases/names",methods=['GET'])
 def get_diseases():
-    k = es.search(index="diseases", doc_type='ypq' ,body='{ "query": { "match_all": {} }, "fields" : ["name","code"] }')['hits']
-    return make_response(jsonify({'data': k }), 200)
+	k = es.search(index="diseases", doc_type='ypq' ,body='{ "query": { "match_all": {} }, "fields" : ["name","code"] }')['hits']
+	return make_response(jsonify({'data': k }), 200)
 
 
 @app.route("/")
@@ -40,10 +42,9 @@ def get_data():
     k = es.search(index="diseases",body='{ "query": { "match_all": {} } }')
     return make_response(jsonify({'data': k }), 200)
 
-@app.route("/crawl", methods=['POST'])
+@app.route("/crawl", methods=['POST'] )
 def crawl():
 	code = request.json['code']
-
 	s = es.search(index="diseases",doc_type="ypq", body='{ "query": { "query_string": {"query":"'+code+'","fields":["code"]} } }')
 	if s['hits']['total']:
 		return "data alredy present"
@@ -54,12 +55,13 @@ def crawl():
 			return "No records found"
 		else:
 			targetSymbols = []
+
 			for i in d.json()["data"]:
 				x = {}
 				x["symbol"] =i["target"]["symbol"]
 				x["id"] = i["target"]["id"]
 
-				k = requests.get("https://www.targetvalidation.org/api/latest/association?target="+x["id"]+"&datastructure=flat&facets=false&stringency=1&filterbyscorevalue_min=0")
+				k = requests.get("https://www.targetvalidation.org/api/latest/association?target="+x["id"])
 				diseases = []
 				for m in k.json()["data"]:
 					diseases.append(m["disease"]["name"])
@@ -74,7 +76,7 @@ def crawl():
 				"facets":d.json()["facets"]["datatypes"],
 				"targetSymbols":targetSymbols
 			}
-			p = es.create(index="diseases",doc_type="ypq",body=json.dumps(payload))
+			# p = es.create(index="diseases",doc_type="ypq",body=json.dumps(payload))
 
 		return json.dumps(payload)
 
@@ -144,6 +146,7 @@ def get_selected_datatypes():
 	print datatypes
 
 	return json.dumps(s)
+
 
 
 if __name__ == "__main__":
